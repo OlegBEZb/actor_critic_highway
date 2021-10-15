@@ -181,6 +181,7 @@ class TD3_base:
         self._current_progress_remaining = 1
         self.num_timesteps = 0
 
+        self.seed = seed or 42
         self.verbose = verbose
         self.tensorboard_log = tensorboard_log
         self._custom_logger = False
