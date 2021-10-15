@@ -9,9 +9,6 @@ import gym
 import numpy as np
 import torch as th
 
-
-from .base_buffers import DictReplayBufferBase
-
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import ActionNoise
 from stable_baselines3.common.callbacks import BaseCallback, CallbackList, ConvertCallback, EvalCallback
@@ -38,6 +35,10 @@ from stable_baselines3.common.vec_env import (
     is_vecenv_wrapped,
     unwrap_vec_normalize,
 )
+
+from .dict_buffer import DictReplayBufferBase, DictReplayBuffer
+from .her_buffers import HerReplayBuffer
+
 
 
 def maybe_make_env(env: Union[GymEnv, str, None], verbose: int) -> Optional[GymEnv]:
@@ -101,33 +102,33 @@ class TD3_base:
     """
 
     def __init__(
-        self,
-        policy: Union[str, Type[TD3Policy]],
-        env: Union[GymEnv, str],
-        learning_rate: Union[float, Schedule] = 1e-3,
-        buffer_size: int = 1000000,  # 1e6
-        learning_starts: int = 100,
-        batch_size: int = 100,
-        tau: float = 0.005,
-        gamma: float = 0.99,
-        train_freq: Union[int, Tuple[int, str]] = (1, "episode"),
-        gradient_steps: int = -1,
-        action_noise: Optional[ActionNoise] = None,
-        replay_buffer_class: Optional[DictReplayBufferBase] = None,
-        replay_buffer_kwargs: Optional[Dict[str, Any]] = None,
-        optimize_memory_usage: bool = False,
-        policy_delay: int = 2,
-        target_policy_noise: float = 0.2,
-        target_noise_clip: float = 0.5,
-        tensorboard_log: Optional[str] = None,
-        create_eval_env: bool = False,
-        policy_kwargs: Optional[Dict[str, Any]] = None,
-        verbose: int = 0,
-        seed: Optional[int] = None,
-        device: Union[th.device, str] = "auto",
-        _init_setup_model: bool = True,
-        supported_action_spaces: Optional[Tuple[gym.spaces.Space, ...]] = None,
-        support_multi_env: bool = False,
+            self,
+            policy: Union[str, Type[TD3Policy]],
+            env: Union[GymEnv, str],
+            learning_rate: Union[float, Schedule] = 1e-3,
+            buffer_size: int = 1000000,  # 1e6
+            learning_starts: int = 100,
+            batch_size: int = 100,
+            tau: float = 0.005,
+            gamma: float = 0.99,
+            train_freq: Union[int, Tuple[int, str]] = (1, "episode"),
+            gradient_steps: int = -1,
+            action_noise: Optional[ActionNoise] = None,
+            replay_buffer_class: Optional[DictReplayBufferBase] = None,
+            replay_buffer_kwargs: Optional[Dict[str, Any]] = None,
+            optimize_memory_usage: bool = False,
+            policy_delay: int = 2,
+            target_policy_noise: float = 0.2,
+            target_noise_clip: float = 0.5,
+            tensorboard_log: Optional[str] = None,
+            create_eval_env: bool = False,
+            policy_kwargs: Optional[Dict[str, Any]] = None,
+            verbose: int = 0,
+            seed: Optional[int] = None,
+            device: Union[th.device, str] = "auto",
+            _init_setup_model: bool = True,
+            supported_action_spaces: Optional[Tuple[gym.spaces.Space, ...]] = None,
+            support_multi_env: bool = False,
     ):
 
         self.device = get_device(device)
@@ -135,7 +136,7 @@ class TD3_base:
             print(f"Using {self.device} device")
 
         self.policy_class = policy
-        self.policy_kwargs = policy_kwargs
+        self.policy_kwargs = policy_kwargs or dict()
 
         self.env = None  # type: Optional[GymEnv]
         self.eval_env = None
@@ -170,7 +171,6 @@ class TD3_base:
         self.target_noise_clip = target_noise_clip
         self.target_policy_noise = target_policy_noise
 
-        self.seed = seed
         self.num_timesteps = 0
         # Used for updating schedules
         self._total_timesteps = 0
@@ -231,15 +231,43 @@ class TD3_base:
     def _setup_model(self) -> None:
         self._setup_lr_schedule()
         self.set_random_seed(self.seed)
-        assert self.replay_buffer_class is not None, 'Replay buffer class should be specified.'
-        self.replay_buffer = self.replay_buffer_class(
-            self.buffer_size,
-            self.observation_space,
-            self.action_space,
-            self.device,
-            optimize_memory_usage=self.optimize_memory_usage,
-            **self.replay_buffer_kwargs,
-        )
+
+        # Use DictReplayBuffer if needed
+        if self.replay_buffer_class is None:
+            if isinstance(self.observation_space, gym.spaces.Dict):
+                self.replay_buffer_class = DictReplayBuffer
+
+        elif self.replay_buffer_class == HerReplayBuffer:
+            assert self.env is not None, "You must pass an environment when using `HerReplayBuffer`"
+
+            # If using offline sampling, we need a classic replay buffer too
+            if self.replay_buffer_kwargs.get("online_sampling", True):
+                replay_buffer = None
+            else:
+                replay_buffer = DictReplayBuffer(
+                    self.buffer_size,
+                    self.observation_space,
+                    self.action_space,
+                    self.device,
+                )
+
+            self.replay_buffer = HerReplayBuffer(
+                self.env,
+                self.buffer_size,
+                self.device,
+                replay_buffer=replay_buffer,
+                **self.replay_buffer_kwargs,
+            )
+
+        if self.replay_buffer is None:
+            self.replay_buffer = self.replay_buffer_class(
+                self.buffer_size,
+                self.observation_space,
+                self.action_space,
+                self.device,
+                # optimize_memory_usage=self.optimize_memory_usage,
+                **self.replay_buffer_kwargs,
+            )
 
         self.policy = self.policy_class(  # pytype:disable=not-instantiable
             self.observation_space,
@@ -955,7 +983,7 @@ class TD3_base:
         ]
 
     @staticmethod
-    def _get_torch_save_params(self) -> Tuple[List[str], List[str]]:
+    def _get_torch_save_params() -> Tuple[List[str], List[str]]:
         state_dicts = ["policy", "actor.optimizer", "critic.optimizer"]
         return state_dicts, []
 
