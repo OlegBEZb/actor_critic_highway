@@ -1049,3 +1049,10 @@ class TD3_base:
             # Retrieve state dict
             params[name] = attr.state_dict()
         return params
+
+    def get_env(self) -> Optional[VecEnv]:
+        """
+        Returns the current environment (can be None if not defined).
+        :return: The current environment
+        """
+        return self.env
