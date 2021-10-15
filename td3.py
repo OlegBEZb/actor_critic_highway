@@ -14,9 +14,10 @@ from base_buffers import DictReplayBufferBase
 
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import ActionNoise
+from stable_baselines3.common.callbacks import BaseCallback, CallbackList, ConvertCallback, EvalCallback
 from stable_baselines3.common.preprocessing import check_for_nested_spaces, is_image_space, is_image_space_channels_first
 from stable_baselines3.common.type_aliases import \
-    GymEnv, RolloutReturn, Schedule, TrainFreq, TrainFrequencyUnit
+    GymEnv, RolloutReturn, Schedule, TrainFreq, TrainFrequencyUnit, MaybeCallback
 from stable_baselines3.common.utils import (
     get_device,
     get_schedule_fn,
@@ -436,6 +437,7 @@ class TD3_base:
     def learn(
         self,
         total_timesteps: int,
+        callback: MaybeCallback = None,
         log_interval: int = 4,
         eval_env: Optional[GymEnv] = None,
         eval_freq: int = -1,
@@ -445,9 +447,10 @@ class TD3_base:
         reset_num_timesteps: bool = True,
     ) -> "TD3_base":
 
-        total_timesteps = self._setup_learn(
+        total_timesteps, callback = self._setup_learn(
             total_timesteps,
             eval_env,
+            callback,
             eval_freq,
             n_eval_episodes,
             eval_log_path,
@@ -455,11 +458,14 @@ class TD3_base:
             tb_log_name,
         )
 
+        callback.on_training_start(locals(), globals())
+
         while self.num_timesteps < total_timesteps:
             rollout = self.collect_rollouts(
                 self.env,
                 train_freq=self.train_freq,
                 action_noise=self.action_noise,
+                callback=callback,
                 learning_starts=self.learning_starts,
                 replay_buffer=self.replay_buffer,
                 log_interval=log_interval,
@@ -476,12 +482,14 @@ class TD3_base:
                 if gradient_steps > 0:
                     self.train(batch_size=self.batch_size, gradient_steps=gradient_steps)
 
+        callback.on_training_end()
         return self
 
     def _setup_learn(
         self,
         total_timesteps: int,
         eval_env: Optional[GymEnv],
+        callback: MaybeCallback = None,
         eval_freq: int = 10000,
         n_eval_episodes: int = 5,
         log_path: Optional[str] = None,
@@ -557,7 +565,6 @@ class TD3_base:
         callback = self._init_callback(callback, eval_env, eval_freq, n_eval_episodes, log_path)
 
         return total_timesteps, callback
-        # return total_timesteps
 
     def _init_callback(
         self,
@@ -678,6 +685,7 @@ class TD3_base:
     def collect_rollouts(
         self,
         env: VecEnv,
+        callback: BaseCallback,
         train_freq: TrainFreq,
         replay_buffer: DictReplayBufferBase,
         action_noise: Optional[ActionNoise] = None,
@@ -712,6 +720,7 @@ class TD3_base:
         assert env.num_envs == 1, "OffPolicyAlgorithm only support single environment"
         assert train_freq.frequency > 0, "Should at least collect one step or episode."
 
+        callback.on_rollout_start()
         continue_training = True
 
         while should_collect_more_steps(train_freq, num_collected_steps, num_collected_episodes):
@@ -730,10 +739,10 @@ class TD3_base:
                 num_collected_steps += 1
 
                 # # Give access to local variables
-                # callback.update_locals(locals())
+                callback.update_locals(locals())
                 # # Only stop training if return value is False, not when it is None.
-                # if callback.on_step() is False:
-                #     return RolloutReturn(0.0, num_collected_steps, num_collected_episodes, continue_training=False)
+                if callback.on_step() is False:
+                    return RolloutReturn(0.0, num_collected_steps, num_collected_episodes, continue_training=False)
 
                 episode_reward += reward
 
@@ -761,7 +770,7 @@ class TD3_base:
                     self._dump_logs()
 
         mean_reward = np.mean(episode_rewards) if num_collected_episodes > 0 else 0.0
-
+        callback.on_rollout_end()
         return RolloutReturn(mean_reward, num_collected_steps, num_collected_episodes, continue_training)
 
     def _update_info_buffer(self, infos: List[Dict[str, Any]], dones: Optional[np.ndarray] = None) -> None:
