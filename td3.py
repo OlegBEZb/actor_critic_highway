@@ -10,7 +10,7 @@ import numpy as np
 import torch as th
 
 
-from base_buffers import DictReplayBufferBase
+from .base_buffers import DictReplayBufferBase
 
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.noise import ActionNoise
