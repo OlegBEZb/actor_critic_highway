@@ -4,13 +4,13 @@ import warnings
 import numpy as np
 import torch as th
 
-from stable_baselines3.common.preprocessing import get_action_dim, get_obs_shape
+from stable_baselines3.common.preprocessing import get_obs_shape
 from stable_baselines3.common.type_aliases import DictReplayBufferSamples
 from stable_baselines3.common.vec_env import VecEnv, VecNormalize
 
 from collections import deque
 
-from .dict_buffer import DictReplayBuffer
+from .dict_buffer import DictReplayBufferBase
 
 
 # For convenience
@@ -48,7 +48,7 @@ def get_time_limit(env: VecEnv, current_max_episode_length: Optional[int]) -> in
     return current_max_episode_length
 
 
-class HerReplayBufferBase(DictReplayBuffer):
+class HerReplayBufferBase(DictReplayBufferBase):
     """
     Hindsight Experience Replay (HER) buffer.
     Paper: https://arxiv.org/abs/1707.01495
@@ -79,7 +79,7 @@ class HerReplayBufferBase(DictReplayBuffer):
             env: VecEnv,
             buffer_size: int,
             device: Union[th.device, str] = "cpu",
-            replay_buffer: Optional[DictReplayBuffer] = None,
+            replay_buffer: Optional["DictReplayBuffer"] = None,
             max_episode_length: Optional[int] = None,
             n_sampled_goal: int = 4,
             goal_selection_strategy: str = "future",
