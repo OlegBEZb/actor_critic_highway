@@ -228,21 +228,3 @@ class DictReplayBufferBase(ABC):
         if env is not None:
             return env.normalize_reward(reward).astype(np.float32)
         return reward
-
-
-class DictReplayBuffer(DictReplayBufferBase):
-
-    def sample(self, batch_size: int, env: Optional[VecNormalize] = None) -> DictReplayBufferSamples:
-        """
-        Sample elements from the replay buffer.
-        :param batch_size: Number of element to sample
-        :param env: associated gym VecEnv
-            to normalize the observations/rewards when sampling
-        :return:
-        """
-        # Call self._get_samples with randomly selected indices
-        ### YOUR CODE HERE ###
-        upper_bound = self.buffer_size if self.full else self.pos
-        batch_inds = np.random.randint(0, upper_bound, size=batch_size)
-        return self._get_samples(batch_inds, env=env)
-        ######################

@@ -36,8 +36,8 @@ from stable_baselines3.common.vec_env import (
     unwrap_vec_normalize,
 )
 
-from .dict_buffer import DictReplayBufferBase, DictReplayBuffer
-from .her_buffers import HerReplayBuffer
+from .dict_buffer import DictReplayBufferBase
+from .her_buffers import HerReplayBufferBase
 
 
 
@@ -115,6 +115,7 @@ class TD3_base:
             gradient_steps: int = -1,
             action_noise: Optional[ActionNoise] = None,
             replay_buffer_class: Optional[DictReplayBufferBase] = None,
+            replay_buffer_inner_class: Optional[DictReplayBufferBase] = None,
             replay_buffer_kwargs: Optional[Dict[str, Any]] = None,
             optimize_memory_usage: bool = False,
             policy_delay: int = 2,
@@ -151,6 +152,7 @@ class TD3_base:
         self.action_noise = action_noise
         self.optimize_memory_usage = optimize_memory_usage
         self.replay_buffer_class = replay_buffer_class
+        self.replay_buffer_inner_class = replay_buffer_inner_class
         if replay_buffer_kwargs is None:
             replay_buffer_kwargs = {}
         self.replay_buffer_kwargs = replay_buffer_kwargs
@@ -216,10 +218,6 @@ class TD3_base:
                     "Error: the model does not support multiple envs; it requires " "a single vectorized environment."
                 )
 
-            # if self.use_sde and not isinstance(self.action_space, gym.spaces.Box):
-            #     raise ValueError(
-            #         "generalized State-Dependent Exploration (gSDE) can only be used with continuous actions.")
-
         if _init_setup_model:
             self._setup_model()
 
@@ -235,24 +233,25 @@ class TD3_base:
 
         # Use DictReplayBuffer if needed
         if self.replay_buffer_class is None:
-            if isinstance(self.observation_space, gym.spaces.Dict):
-                self.replay_buffer_class = DictReplayBuffer
+            raise ValueError("You should specify `self.replay_buffer_class`.")
 
-        elif self.replay_buffer_class == HerReplayBuffer:
+        elif issubclass(self.replay_buffer_class, HerReplayBufferBase):
             assert self.env is not None, "You must pass an environment when using `HerReplayBuffer`"
 
             # If using offline sampling, we need a classic replay buffer too
             if self.replay_buffer_kwargs.get("online_sampling", True):
                 replay_buffer = None
-            else:
-                replay_buffer = DictReplayBuffer(
+            elif issubclass(self.replay_buffer_inner_class, DictReplayBufferBase):
+                replay_buffer = self.replay_buffer_inner_class(
                     self.buffer_size,
                     self.observation_space,
                     self.action_space,
                     self.device,
                 )
+            else:
+                raise ValueError("`replay_buffer_inner_class` may be only None or DictReplayBuffer.")
 
-            self.replay_buffer = HerReplayBuffer(
+            self.replay_buffer = self.replay_buffer_class(
                 self.env,
                 self.buffer_size,
                 self.device,
@@ -330,124 +329,6 @@ class TD3_base:
         self.critic = self.policy.critic
         self.critic_target = self.policy.critic_target
 
-    def train(self, gradient_steps: int, batch_size: int = 100) -> None:
-        # Switch to train mode (this affects batch norm / dropout)
-        self.policy.set_training_mode(True)
-
-        # Update learning rate according to lr schedule
-        self._update_learning_rate([self.actor.optimizer, self.critic.optimizer])
-
-        actor_losses, critic_losses = [], []
-
-        for _ in range(gradient_steps):
-
-            self._n_updates += 1
-            # Sample replay buffer
-            replay_data = self.replay_buffer.sample(batch_size, env=self._vec_normalize_env)
-
-            with th.no_grad():
-                # Select action according to policy and add clipped noise:
-
-                ### GAPPED:
-                # noise = replay_data.actions.clone().data.normal_(0, self.target_policy_noise)
-                # noise = noise.clamp(-self.target_noise_clip, self.target_noise_clip)
-                # next_actions = (self.actor_target(replay_data.next_observations) + noise).clamp(-1, 1)
-                ### GAPPED.
-
-                # 1. Generate noise with shape == replay_data.actions.shape
-                # 2. Clip noise with a constant self.target_noise_clip
-                # 3. Add noise to the action tensor:
-                # YOUR CODE HERE:
-                #################
-
-
-                ### GAPPED:
-                # Compute the next Q-values: min over all critics targets
-                # next_q_values = th.cat(self.critic_target(replay_data.next_observations, next_actions), dim=1)
-                # next_q_values, _ = th.min(next_q_values, dim=1, keepdim=True)
-                # target_q_values = replay_data.rewards + (1 - replay_data.dones) * self.gamma * next_q_values
-                ### GAPPED.
-
-                # 1. Get next Q values from critic network
-                # 2. Update Q values for target network using specific formula
-                # YOUR CODE HERE:
-                #################
-
-                pass  # remove after completing gaps
-
-            # Get current Q-values estimates for each critic network
-            current_q_values = self.critic(replay_data.observations, replay_data.actions)
-
-
-            ### GAPPED:
-            # critic_loss = sum([F.mse_loss(current_q, target_q_values) for current_q in current_q_values])
-            ### GAPPED.
-
-            # 1. Compute MSE loss between current and target Q values:
-            # YOUR CODE HERE:
-            #################
-            critic_loss = None
-
-            critic_losses.append(critic_loss.item())
-
-            # Optimize the critics
-            self.critic.optimizer.zero_grad()
-            critic_loss.backward()
-            self.critic.optimizer.step()
-
-            # Delayed policy updates
-            if self._n_updates % self.policy_delay == 0:
-                # Compute actor loss
-
-                ### GAPPED:
-                # actor_loss = -self.critic.q1_forward(replay_data.observations, self.actor(replay_data.observations)).mean()
-                # actor_losses.append(actor_loss.item())
-                ### GAPPED.
-
-                # 1. Compute actor loss using critic network:
-                # YOUR CODE HERE:
-                #################
-                actor_loss: th.Tensor = 0  # Replace it
-
-                # Optimize the actor
-                self.actor.optimizer.zero_grad()
-                actor_loss.backward()
-                self.actor.optimizer.step()
-
-                self.polyak_update(self.critic.parameters(), self.critic_target.parameters(), self.tau)
-                self.polyak_update(self.actor.parameters(), self.actor_target.parameters(), self.tau)
-
-        self.logger.record("train/n_updates", self._n_updates, exclude="tensorboard")
-        if len(actor_losses) > 0:
-            self.logger.record("train/actor_loss", np.mean(actor_losses))
-        self.logger.record("train/critic_loss", np.mean(critic_losses))
-
-    @staticmethod
-    def polyak_update(
-        params: Iterable[th.nn.Parameter],
-        target_params: Iterable[th.nn.Parameter],
-        tau: float,
-    ):
-        """
-        Perform a Polyak average update on ``target_params`` using ``params``:
-        target parameters are slowly updated towards the main parameters.
-        ``tau``, the soft update coefficient controls the interpolation:
-        ``tau=1`` corresponds to copying the parameters to the target ones whereas nothing happens when ``tau=0``.
-        The Polyak update is done in place, with ``no_grad``, and therefore does not create intermediate tensors,
-        or a computation graph, reducing memory cost and improving performance.  We scale the target params
-        by ``1-tau`` (in-place), add the new weights, scaled by ``tau`` and store the result of the sum in the target
-        params (in place).
-        See https://github.com/DLR-RM/stable-baselines3/issues/93
-
-        :param params: parameters to use to update the target params
-        :param target_params: parameters to update
-        :param tau: the soft update coefficient ("Polyak update", between 0 and 1)
-        """
-        # YOUR CODE HERE:
-        #################
-        raise NotImplementedError
-
-    # from BaseAlgorithm:
     def _update_learning_rate(self, optimizers: Union[List[th.optim.Optimizer], th.optim.Optimizer]) -> None:
         """
         Update the optimizers learning rate using the current learning rate schedule
